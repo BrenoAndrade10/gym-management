@@ -1,0 +1,10 @@
+node_modules
+.svelte-kit
+build
+dist
+.env
+.yarn
+.pnp.cjs
+.pnp.loader.mjs
+npm-debug.log*
+yarn-error.log*
