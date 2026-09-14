@@ -207,6 +207,7 @@
 
 			currentUser = (await response.json()) as AuthenticatedUser;
 			isAuthenticated = true;
+			await loadStudents();
 		} catch (error) {
 			showAuthError(error instanceof Error ? error.message : 'Erro inesperado ao entrar.');
 		} finally {
@@ -254,6 +255,7 @@
 				password: registerForm.password
 			};
 			isAuthenticated = true;
+			await loadStudents();
 		} catch (error) {
 			showAuthError(error instanceof Error ? error.message : 'Erro inesperado ao criar conta.');
 		} finally {
@@ -371,6 +373,8 @@
 			students = (await response.json()) as Student[];
 			selectedStudentId = selectedStudentId ?? students[0]?.id ?? null;
 		} catch (error) {
+			students = [];
+			selectedStudentId = null;
 			showError(error instanceof Error ? error.message : 'Erro inesperado ao carregar alunos.');
 		} finally {
 			isLoading = false;
