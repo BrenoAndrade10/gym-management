@@ -112,6 +112,16 @@
 		exercises: WorkoutExerciseForm[];
 	}
 
+	interface WorkoutPayload {
+		title: string;
+		notes?: string;
+		exercises: WorkoutExerciseForm[];
+	}
+
+	interface CreateWorkoutPayload extends WorkoutPayload {
+		studentId: string;
+	}
+
 	interface LoginForm {
 		email: string;
 		password: string;
@@ -640,12 +650,14 @@
 
 		isWorkoutSubmitting = true;
 
-		const payload = {
-			studentId: workoutForm.studentId,
+		const workoutPayload: WorkoutPayload = {
 			title: workoutForm.title.trim(),
 			notes: workoutForm.notes.trim() || undefined,
 			exercises
 		};
+		const payload: WorkoutPayload | CreateWorkoutPayload = editingWorkoutId
+			? workoutPayload
+			: { ...workoutPayload, studentId: workoutForm.studentId };
 
 		try {
 			const response = await fetch(
