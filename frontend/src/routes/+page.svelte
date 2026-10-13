@@ -5,6 +5,7 @@
 	const API_BASE_URL = env.PUBLIC_API_URL || 'http://127.0.0.1:3008/api';
 	const API_URL = `${API_BASE_URL}/students`;
 	const AUTH_URL = `${API_BASE_URL}/auth`;
+	const WORKOUTS_URL = `${API_BASE_URL}/workouts`;
 
 	type StudentStatus = 'active' | 'inactive';
 	type StatusFilter = 'all' | StudentStatus;
@@ -37,7 +38,7 @@
 			label: 'Treinos',
 			eyebrow: 'AC2 - Gestao de treinos',
 			title: 'Treinos',
-			description: 'Criacao e atribuicao de treinos personalizados entrara nesta etapa.'
+			description: 'Monte treinos personalizados com exercicios, series e repeticoes por aluno.'
 		},
 		{
 			id: 'exercises',
@@ -77,6 +78,40 @@
 		status: StudentStatus;
 	}
 
+	interface WorkoutExercise {
+		id: string;
+		workoutId: string;
+		exerciseName: string;
+		sets: number;
+		repetitions: number;
+		order: number;
+		createdAt: string;
+		updatedAt: string;
+	}
+
+	interface Workout {
+		id: string;
+		studentId: string;
+		title: string;
+		notes?: string;
+		exercises: WorkoutExercise[];
+		createdAt: string;
+		updatedAt: string;
+	}
+
+	interface WorkoutExerciseForm {
+		exerciseName: string;
+		sets: number;
+		repetitions: number;
+	}
+
+	interface WorkoutForm {
+		studentId: string;
+		title: string;
+		notes: string;
+		exercises: WorkoutExerciseForm[];
+	}
+
 	interface LoginForm {
 		email: string;
 		password: string;
@@ -108,17 +143,30 @@
 		status: 'active'
 	});
 
+	const emptyWorkoutForm = (): WorkoutForm => ({
+		studentId: selectedStudentId ?? students[0]?.id ?? '',
+		title: '',
+		notes: '',
+		exercises: [{ exerciseName: '', sets: 3, repetitions: 10 }]
+	});
+
 	let students = $state<Student[]>([]);
+	let workouts = $state<Workout[]>([]);
 	let selectedStudentId = $state<string | null>(null);
 	let editingStudentId = $state<string | null>(null);
+	let editingWorkoutId = $state<string | null>(null);
 	let form = $state<StudentForm>(emptyForm());
+	let workoutForm = $state<WorkoutForm>(emptyWorkoutForm());
 	let searchTerm = $state('');
 	let statusFilter = $state<StatusFilter>('all');
 	let activeView = $state<ActiveView>('students');
 	let isLoading = $state(true);
+	let isWorkoutsLoading = $state(false);
 	let isSubmitting = $state(false);
+	let isWorkoutSubmitting = $state(false);
 	let isAuthSubmitting = $state(false);
 	let isStudentModalOpen = $state(false);
+	let isWorkoutModalOpen = $state(false);
 	let errorMessage = $state('');
 	let successMessage = $state('');
 	let authMode = $state<AuthMode>('login');
@@ -147,6 +195,7 @@
 	let activeStudentsPercent = $derived(calculatePercent(activeStudentsCount, students.length));
 	let inactiveStudentsPercent = $derived(calculatePercent(inactiveStudentsCount, students.length));
 	let isEditing = $derived(Boolean(editingStudentId));
+	let isEditingWorkout = $derived(Boolean(editingWorkoutId));
 	let filteredStudents = $derived(
 		students.filter((student) => {
 			const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -163,6 +212,14 @@
 	let selectedStudent = $derived(
 		students.find((student) => student.id === selectedStudentId) ?? filteredStudents[0] ?? null
 	);
+	let selectedStudentWorkouts = $derived(
+		selectedStudent ? workouts.filter((workout) => workout.studentId === selectedStudent.id) : []
+	);
+	let workoutsCount = $derived(workouts.length);
+	let assignedStudentsCount = $derived(new Set(workouts.map((workout) => workout.studentId)).size);
+	let exercisesCount = $derived(
+		workouts.reduce((total, workout) => total + workout.exercises.length, 0)
+	);
 	let activeViewInfo = $derived(
 		sidebarItems.find((item) => item.id === activeView) ?? sidebarItems[1]
 	);
@@ -172,6 +229,7 @@
 
 	onMount(() => {
 		void loadStudents();
+		void loadWorkouts();
 	});
 
 	function switchAuthMode(mode: AuthMode) {
@@ -207,7 +265,7 @@
 
 			currentUser = (await response.json()) as AuthenticatedUser;
 			isAuthenticated = true;
-			await loadStudents();
+			await Promise.all([loadStudents(), loadWorkouts()]);
 		} catch (error) {
 			showAuthError(error instanceof Error ? error.message : 'Erro inesperado ao entrar.');
 		} finally {
@@ -255,7 +313,7 @@
 				password: registerForm.password
 			};
 			isAuthenticated = true;
-			await loadStudents();
+			await Promise.all([loadStudents(), loadWorkouts()]);
 		} catch (error) {
 			showAuthError(error instanceof Error ? error.message : 'Erro inesperado ao criar conta.');
 		} finally {
@@ -381,6 +439,25 @@
 		}
 	}
 
+	async function loadWorkouts() {
+		isWorkoutsLoading = true;
+		clearError();
+
+		try {
+			const response = await fetch(WORKOUTS_URL);
+			if (!response.ok) {
+				throw new Error('Nao foi possivel carregar os treinos.');
+			}
+
+			workouts = (await response.json()) as Workout[];
+		} catch (error) {
+			workouts = [];
+			showError(error instanceof Error ? error.message : 'Erro inesperado ao carregar treinos.');
+		} finally {
+			isWorkoutsLoading = false;
+		}
+	}
+
 	function openCreateModal() {
 		form = emptyForm();
 		editingStudentId = null;
@@ -476,11 +553,162 @@
 			}
 
 			students = students.filter((item) => item.id !== student.id);
+			workouts = workouts.filter((workout) => workout.studentId !== student.id);
 			selectedStudentId = students[0]?.id ?? null;
 			showSuccess('Aluno excluido com sucesso.');
 		} catch (error) {
 			showError(error instanceof Error ? error.message : 'Erro inesperado ao excluir aluno.');
 		}
+	}
+
+	function openCreateWorkoutModal() {
+		workoutForm = emptyWorkoutForm();
+		editingWorkoutId = null;
+		clearError();
+		clearSuccess();
+		isWorkoutModalOpen = true;
+	}
+
+	function closeWorkoutModal() {
+		isWorkoutModalOpen = false;
+		workoutForm = emptyWorkoutForm();
+		editingWorkoutId = null;
+	}
+
+	function startEditingWorkout(workout: Workout) {
+		editingWorkoutId = workout.id;
+		selectedStudentId = workout.studentId;
+		clearSuccess();
+		clearError();
+		workoutForm = {
+			studentId: workout.studentId,
+			title: workout.title,
+			notes: workout.notes ?? '',
+			exercises: workout.exercises.map((exercise) => ({
+				exerciseName: exercise.exerciseName,
+				sets: exercise.sets,
+				repetitions: exercise.repetitions
+			}))
+		};
+		isWorkoutModalOpen = true;
+	}
+
+	function addWorkoutExercise() {
+		workoutForm = {
+			...workoutForm,
+			exercises: [...workoutForm.exercises, { exerciseName: '', sets: 3, repetitions: 10 }]
+		};
+	}
+
+	function removeWorkoutExercise(index: number) {
+		if (workoutForm.exercises.length === 1) {
+			return;
+		}
+
+		workoutForm = {
+			...workoutForm,
+			exercises: workoutForm.exercises.filter((_, itemIndex) => itemIndex !== index)
+		};
+	}
+
+	async function saveWorkout() {
+		clearError();
+		clearSuccess();
+
+		const exercises = workoutForm.exercises
+			.map((exercise) => ({
+				exerciseName: exercise.exerciseName.trim(),
+				sets: Number(exercise.sets),
+				repetitions: Number(exercise.repetitions)
+			}))
+			.filter((exercise) => exercise.exerciseName);
+
+		if (!workoutForm.studentId) {
+			showError('Selecione um aluno para montar o treino.');
+			return;
+		}
+
+		if (!workoutForm.title.trim()) {
+			showError('Informe um nome para o treino.');
+			return;
+		}
+
+		if (exercises.length === 0) {
+			showError('Adicione pelo menos um exercicio ao treino.');
+			return;
+		}
+
+		isWorkoutSubmitting = true;
+
+		const payload = {
+			studentId: workoutForm.studentId,
+			title: workoutForm.title.trim(),
+			notes: workoutForm.notes.trim() || undefined,
+			exercises
+		};
+
+		try {
+			const response = await fetch(
+				editingWorkoutId ? `${WORKOUTS_URL}/${editingWorkoutId}` : WORKOUTS_URL,
+				{
+					method: editingWorkoutId ? 'PATCH' : 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify(payload)
+				}
+			);
+
+			if (!response.ok) {
+				throw new Error(await getApiErrorMessage(response, 'Nao foi possivel salvar o treino.'));
+			}
+
+			const savedWorkout = (await response.json()) as Workout;
+
+			if (editingWorkoutId) {
+				workouts = workouts.map((workout) =>
+					workout.id === savedWorkout.id ? savedWorkout : workout
+				);
+				showSuccess('Treino atualizado com sucesso.');
+			} else {
+				workouts = [savedWorkout, ...workouts];
+				showSuccess('Treino cadastrado com sucesso.');
+			}
+
+			selectedStudentId = savedWorkout.studentId;
+			closeWorkoutModal();
+		} catch (error) {
+			showError(error instanceof Error ? error.message : 'Erro inesperado ao salvar treino.');
+		} finally {
+			isWorkoutSubmitting = false;
+		}
+	}
+
+	async function deleteWorkout(workout: Workout) {
+		const shouldDelete = confirm(`Excluir o treino ${workout.title}?`);
+		if (!shouldDelete) return;
+
+		clearError();
+		clearSuccess();
+
+		try {
+			const response = await fetch(`${WORKOUTS_URL}/${workout.id}`, {
+				method: 'DELETE'
+			});
+
+			if (!response.ok) {
+				throw new Error('Nao foi possivel excluir o treino.');
+			}
+
+			workouts = workouts.filter((item) => item.id !== workout.id);
+			showSuccess('Treino excluido com sucesso.');
+		} catch (error) {
+			showError(error instanceof Error ? error.message : 'Erro inesperado ao excluir treino.');
+		}
+	}
+
+	function getStudentName(studentId: string) {
+		return students.find((student) => student.id === studentId)?.name ?? 'Aluno nao encontrado';
 	}
 
 	function calculatePercent(value: number, total: number) {
@@ -713,6 +941,10 @@
 					<button class="primary-button" type="button" onclick={openCreateModal}
 						>+ Novo aluno</button
 					>
+				{:else if activeView === 'workouts'}
+					<button class="primary-button" type="button" onclick={openCreateWorkoutModal}
+						>+ Novo treino</button
+					>
 				{/if}
 			</header>
 
@@ -860,6 +1092,130 @@
 						</dl>
 					</section>
 				{/if}
+			{:else if activeView === 'workouts'}
+				<section class="metrics" aria-label="Indicadores de treinos">
+					<article class="metric-card">
+						<span class="metric-label">Treinos</span>
+						<strong>{workoutsCount}</strong>
+						<p>Planos cadastrados</p>
+					</article>
+					<article class="metric-card">
+						<span class="metric-label">Alunos com treino</span>
+						<strong>{assignedStudentsCount}</strong>
+						<p>Receberam ao menos um plano</p>
+					</article>
+					<article class="metric-card">
+						<span class="metric-label">Exercicios</span>
+						<strong>{exercisesCount}</strong>
+						<p>Itens prescritos</p>
+					</article>
+				</section>
+
+				{#if errorMessage}
+					<p class="feedback error">{errorMessage}</p>
+				{/if}
+
+				{#if successMessage}
+					<p class="feedback success">{successMessage}</p>
+				{/if}
+
+				<section class="workouts-layout">
+					<aside class="workout-students-panel" aria-label="Alunos para treino">
+						<div class="panel-heading compact-heading">
+							<div>
+								<h2>Aluno</h2>
+								<p>Selecione para ver os treinos</p>
+							</div>
+						</div>
+
+						{#if isLoading}
+							<p class="empty-state">Carregando alunos...</p>
+						{:else if students.length === 0}
+							<p class="empty-state">Cadastre um aluno antes de montar treinos.</p>
+						{:else}
+							<div class="student-picker">
+								{#each students as student (student.id)}
+									<button
+										class:active={student.id === selectedStudent?.id}
+										type="button"
+										onclick={() => (selectedStudentId = student.id)}
+									>
+										<span class="avatar">{getInitials(student.name)}</span>
+										<span>
+											<strong>{student.name}</strong>
+											<small>{student.status === 'active' ? 'Ativo' : 'Inativo'}</small>
+										</span>
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</aside>
+
+					<section class="workouts-panel">
+						<div class="panel-heading">
+							<div>
+								<h2>{selectedStudent ? `Treinos de ${selectedStudent.name}` : 'Treinos'}</h2>
+								<p>{selectedStudentWorkouts.length} treino(s) para o aluno selecionado</p>
+							</div>
+							<button
+								class="primary-button compact"
+								disabled={students.length === 0}
+								type="button"
+								onclick={openCreateWorkoutModal}
+							>
+								+ Novo treino
+							</button>
+						</div>
+
+						{#if isWorkoutsLoading}
+							<p class="empty-state">Carregando treinos...</p>
+						{:else if !selectedStudent}
+							<p class="empty-state">Selecione ou cadastre um aluno para gerenciar treinos.</p>
+						{:else if selectedStudentWorkouts.length === 0}
+							<div class="empty-workouts">
+								<h2>Nenhum treino cadastrado</h2>
+								<p>Crie um treino com exercicios, series e repeticoes para este aluno.</p>
+								<button class="primary-button" type="button" onclick={openCreateWorkoutModal}>
+									Criar treino
+								</button>
+							</div>
+						{:else}
+							<div class="workout-list">
+								{#each selectedStudentWorkouts as workout (workout.id)}
+									<article class="workout-card">
+										<header>
+											<div>
+												<span>{getStudentName(workout.studentId)}</span>
+												<h2>{workout.title}</h2>
+												{#if workout.notes}
+													<p>{workout.notes}</p>
+												{/if}
+											</div>
+											<div class="row-actions">
+												<button type="button" onclick={() => startEditingWorkout(workout)}
+													>Editar</button
+												>
+												<button class="danger" type="button" onclick={() => deleteWorkout(workout)}>
+													Excluir
+												</button>
+											</div>
+										</header>
+
+										<div class="exercise-grid" aria-label="Exercicios do treino">
+											{#each workout.exercises as exercise (exercise.id)}
+												<div class="exercise-row">
+													<strong>{exercise.exerciseName}</strong>
+													<span>{exercise.sets} serie(s)</span>
+													<span>{exercise.repetitions} repeticao(oes)</span>
+												</div>
+											{/each}
+										</div>
+									</article>
+								{/each}
+							</div>
+						{/if}
+					</section>
+				</section>
 			{:else}
 				<section class="coming-soon" aria-label={`${activeViewInfo.title} em breve`}>
 					<span class="coming-soon-dot" aria-hidden="true"></span>
@@ -943,6 +1299,120 @@
 						onclick={saveStudent}
 					>
 						{isSubmitting ? 'Salvando...' : isEditing ? 'Salvar edicao' : 'Cadastrar'}
+					</button>
+				</footer>
+			</form>
+		</div>
+	</div>
+{/if}
+
+{#if isAuthenticated && isWorkoutModalOpen}
+	<div class="modal-backdrop">
+		<button
+			class="backdrop-close"
+			type="button"
+			aria-label="Fechar modal"
+			onclick={closeWorkoutModal}
+		></button>
+		<div
+			class="student-modal workout-modal"
+			aria-labelledby="workout-modal-title"
+			role="dialog"
+			aria-modal="true"
+		>
+			<header>
+				<div>
+					<h2 id="workout-modal-title">{isEditingWorkout ? 'Editar treino' : 'Novo treino'}</h2>
+					<p>
+						{isEditingWorkout
+							? 'Atualize exercicios, series e repeticoes.'
+							: 'Monte o plano do aluno com exercicios, series e repeticoes.'}
+					</p>
+				</div>
+				<button class="icon-button" type="button" aria-label="Fechar" onclick={closeWorkoutModal}
+					>x</button
+				>
+			</header>
+
+			<form onsubmit={(event) => event.preventDefault()}>
+				<label>
+					<span>Aluno</span>
+					<select bind:value={workoutForm.studentId} disabled={isEditingWorkout}>
+						<option value="">Selecione um aluno</option>
+						{#each students as student (student.id)}
+							<option value={student.id}>{student.name}</option>
+						{/each}
+					</select>
+				</label>
+
+				<label>
+					<span>Nome do treino</span>
+					<input
+						bind:value={workoutForm.title}
+						maxlength="120"
+						placeholder="Ex: Treino A - Peito"
+					/>
+				</label>
+
+				<label>
+					<span>Observacoes</span>
+					<input
+						bind:value={workoutForm.notes}
+						maxlength="500"
+						placeholder="Ex: descanso de 60 segundos entre series"
+					/>
+				</label>
+
+				<section class="exercise-form-section" aria-label="Exercicios do treino">
+					<div class="exercise-form-heading">
+						<h3>Exercicios</h3>
+						<button class="secondary-button" type="button" onclick={addWorkoutExercise}>
+							+ Exercicio
+						</button>
+					</div>
+
+					{#each workoutForm.exercises as exercise, index}
+						<div class="exercise-form-row">
+							<label>
+								<span>Exercicio</span>
+								<input
+									bind:value={exercise.exerciseName}
+									maxlength="120"
+									placeholder="Supino reto"
+								/>
+							</label>
+							<label>
+								<span>Series</span>
+								<input bind:value={exercise.sets} min="1" max="99" type="number" />
+							</label>
+							<label>
+								<span>Repeticoes</span>
+								<input bind:value={exercise.repetitions} min="1" max="999" type="number" />
+							</label>
+							<button
+								class="icon-button danger-icon"
+								disabled={workoutForm.exercises.length === 1}
+								type="button"
+								aria-label="Remover exercicio"
+								onclick={() => removeWorkoutExercise(index)}
+							>
+								x
+							</button>
+						</div>
+					{/each}
+				</section>
+
+				<footer>
+					<button class="secondary-button" type="button" onclick={closeWorkoutModal}
+						>Cancelar</button
+					>
+					<button
+						class="primary-button"
+						disabled={isWorkoutSubmitting}
+						type="button"
+						onclick={saveWorkout}
+					>
+						{isWorkoutSubmitting ? 'Salvando...' : isEditingWorkout ? 'Salvar treino' : 'Cadastrar'}
 					</button>
 				</footer>
 			</form>
@@ -1307,7 +1777,9 @@
 	}
 
 	.students-panel,
-	.details-strip {
+	.details-strip,
+	.workout-students-panel,
+	.workouts-panel {
 		border: 1px solid #e5e7eb;
 		border-radius: 8px;
 		background: #ffffff;
@@ -1325,9 +1797,15 @@
 	.panel-heading h2,
 	.details-strip h2,
 	.coming-soon h2,
-	.student-modal h2 {
+	.student-modal h2,
+	.workout-card h2,
+	.empty-workouts h2 {
 		color: #111827;
 		font-size: 1rem;
+	}
+
+	.compact-heading {
+		padding: 16px;
 	}
 
 	.coming-soon {
@@ -1585,6 +2063,129 @@
 		color: #991b1b;
 	}
 
+	.workouts-layout {
+		display: grid;
+		grid-template-columns: 300px minmax(0, 1fr);
+		gap: 18px;
+	}
+
+	.workout-students-panel,
+	.workouts-panel {
+		overflow: hidden;
+	}
+
+	.workout-students-panel {
+		align-self: start;
+	}
+
+	.student-picker {
+		display: grid;
+		gap: 6px;
+		padding: 10px;
+	}
+
+	.student-picker button {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		padding: 10px;
+		color: #111827;
+		cursor: pointer;
+		text-align: left;
+	}
+
+	.student-picker button:hover,
+	.student-picker button.active {
+		background: #f0fdf4;
+	}
+
+	.student-picker strong,
+	.student-picker small {
+		display: block;
+	}
+
+	.student-picker small {
+		margin-top: 2px;
+		color: #6b7280;
+	}
+
+	.empty-workouts {
+		display: grid;
+		justify-items: start;
+		gap: 10px;
+		padding: 28px 18px;
+	}
+
+	.empty-workouts p {
+		color: #6b7280;
+	}
+
+	.workout-list {
+		display: grid;
+		gap: 12px;
+		padding: 14px;
+	}
+
+	.workout-card {
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		background: #ffffff;
+		overflow: hidden;
+	}
+
+	.workout-card header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+		border-bottom: 1px solid #f0f2f4;
+		padding: 16px;
+	}
+
+	.workout-card header span {
+		display: block;
+		margin-bottom: 4px;
+		color: #16a34a;
+		font-size: 0.75rem;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.workout-card p {
+		margin-top: 6px;
+		color: #6b7280;
+	}
+
+	.exercise-grid {
+		display: grid;
+		gap: 8px;
+		padding: 12px 16px 16px;
+	}
+
+	.exercise-row {
+		display: grid;
+		grid-template-columns: minmax(180px, 1fr) 120px 150px;
+		gap: 12px;
+		align-items: center;
+		border-radius: 8px;
+		background: #f9fafb;
+		padding: 10px 12px;
+	}
+
+	.exercise-row strong {
+		color: #111827;
+	}
+
+	.exercise-row span {
+		color: #4b5563;
+		font-size: 0.9rem;
+		font-weight: 800;
+	}
+
 	.empty-state {
 		padding: 28px 18px;
 		color: #6b7280;
@@ -1647,9 +2248,15 @@
 		position: relative;
 		z-index: 1;
 		width: min(480px, 100%);
+		max-height: calc(100vh - 40px);
+		overflow: auto;
 		border-radius: 8px;
 		background: #ffffff;
 		box-shadow: 0 24px 80px rgb(17 24 39 / 0.28);
+	}
+
+	.workout-modal {
+		width: min(760px, 100%);
 	}
 
 	.student-modal header {
@@ -1684,6 +2291,40 @@
 		justify-content: flex-end;
 		gap: 10px;
 		padding-top: 4px;
+	}
+
+	.exercise-form-section {
+		display: grid;
+		gap: 12px;
+		border-top: 1px solid #e5e7eb;
+		padding-top: 14px;
+	}
+
+	.exercise-form-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.exercise-form-heading h3 {
+		margin: 0;
+		color: #111827;
+		font-size: 0.95rem;
+	}
+
+	.exercise-form-row {
+		display: grid;
+		grid-template-columns: minmax(180px, 1fr) 100px 120px 36px;
+		gap: 10px;
+		align-items: end;
+		border: 1px solid #e5e7eb;
+		border-radius: 8px;
+		padding: 12px;
+	}
+
+	.danger-icon {
+		color: #991b1b;
 	}
 
 	@media (max-width: 980px) {
@@ -1727,6 +2368,10 @@
 			align-items: flex-start;
 		}
 
+		.workouts-layout {
+			grid-template-columns: 1fr;
+		}
+
 		dl,
 		.metrics {
 			grid-template-columns: 1fr;
@@ -1747,7 +2392,9 @@
 		}
 
 		.toolbar,
-		.field-grid {
+		.field-grid,
+		.exercise-row,
+		.exercise-form-row {
 			grid-template-columns: 1fr;
 		}
 

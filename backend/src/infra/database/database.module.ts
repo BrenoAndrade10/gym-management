@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { StudentOrmEntity } from './typeorm/entities/student.orm-entity';
 import { UserOrmEntity } from './typeorm/entities/user.orm-entity';
+import { WorkoutExerciseOrmEntity } from './typeorm/entities/workout-exercise.orm-entity';
+import { WorkoutOrmEntity } from './typeorm/entities/workout.orm-entity';
 
 @Module({
   imports: [
@@ -12,7 +14,12 @@ import { UserOrmEntity } from './typeorm/entities/user.orm-entity';
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
         url: configService.getOrThrow<string>('DATABASE_URL'),
-        entities: [StudentOrmEntity, UserOrmEntity],
+        entities: [
+          StudentOrmEntity,
+          UserOrmEntity,
+          WorkoutOrmEntity,
+          WorkoutExerciseOrmEntity,
+        ],
         synchronize:
           configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
         ssl: {
