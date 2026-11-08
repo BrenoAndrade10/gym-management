@@ -5,6 +5,11 @@ import {
   StudentsRepository,
 } from '../../../students/domain/repositories/students.repository';
 import { Workout, WorkoutExercise } from '../../domain/entities/workout.entity';
+import { WorkoutExecution } from '../../domain/entities/workout-execution.entity';
+import {
+  WORKOUT_EXECUTIONS_REPOSITORY,
+  WorkoutExecutionsRepository,
+} from '../../domain/repositories/workout-executions.repository';
 import {
   WORKOUTS_REPOSITORY,
   WorkoutsRepository,
@@ -12,6 +17,7 @@ import {
 import { CreateWorkoutDto } from '../dto/create-workout.dto';
 import { UpdateWorkoutDto } from '../dto/update-workout.dto';
 import { WorkoutExerciseDto } from '../dto/workout-exercise.dto';
+import { CreateWorkoutExecutionDto } from '../dto/create-workout-execution.dto';
 
 @Injectable()
 export class WorkoutsService {
@@ -20,6 +26,8 @@ export class WorkoutsService {
     private readonly workoutsRepository: WorkoutsRepository,
     @Inject(STUDENTS_REPOSITORY)
     private readonly studentsRepository: StudentsRepository,
+    @Inject(WORKOUT_EXECUTIONS_REPOSITORY)
+    private readonly executionsRepository: WorkoutExecutionsRepository,
   ) {}
 
   async create(createWorkoutDto: CreateWorkoutDto) {
@@ -85,6 +93,35 @@ export class WorkoutsService {
   async remove(id: string) {
     await this.findOne(id);
     await this.workoutsRepository.delete(id);
+  }
+
+  async recordExecution(id: string, dto: CreateWorkoutExecutionDto) {
+    const workout = await this.findOne(id);
+    const now = new Date().toISOString();
+    const execution: WorkoutExecution = {
+      id: randomUUID(),
+      workoutId: workout.id,
+      studentId: workout.studentId,
+      executedAt: dto.executedAt ?? now,
+      durationMinutes: dto.durationMinutes,
+      notes: dto.notes,
+      createdAt: now,
+    };
+
+    return this.executionsRepository.create(execution);
+  }
+
+  async findExecutionHistory(studentId?: string) {
+    if (studentId) {
+      await this.ensureStudentExists(studentId);
+    }
+
+    return this.executionsRepository.findAll(studentId);
+  }
+
+  async findWorkoutExecutionHistory(id: string) {
+    await this.findOne(id);
+    return this.executionsRepository.findByWorkoutId(id);
   }
 
   private async ensureStudentExists(studentId: string) {

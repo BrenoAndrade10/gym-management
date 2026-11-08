@@ -6,6 +6,7 @@
 	const API_URL = `${API_BASE_URL}/students`;
 	const AUTH_URL = `${API_BASE_URL}/auth`;
 	const WORKOUTS_URL = `${API_BASE_URL}/workouts`;
+	const EXECUTIONS_URL = `${WORKOUTS_URL}/executions`;
 
 	type StudentStatus = 'active' | 'inactive';
 	type StatusFilter = 'all' | StudentStatus;
@@ -50,10 +51,9 @@
 		{
 			id: 'progress',
 			label: 'Evolucao',
-			eyebrow: 'Entrega final - Dashboard',
+			eyebrow: 'AC3 - Execucao e historico',
 			title: 'Evolucao',
-			description:
-				'Graficos de desempenho e historico de execucao serao implementados na entrega final.'
+			description: 'Acompanhe a execucao e o historico dos treinos de cada aluno.'
 		}
 	];
 
@@ -97,6 +97,16 @@
 		exercises: WorkoutExercise[];
 		createdAt: string;
 		updatedAt: string;
+	}
+
+	interface WorkoutExecution {
+		id: string;
+		workoutId: string;
+		studentId: string;
+		executedAt: string;
+		durationMinutes?: number;
+		notes?: string;
+		createdAt: string;
 	}
 
 	interface WorkoutExerciseForm {
@@ -162,6 +172,7 @@
 
 	let students = $state<Student[]>([]);
 	let workouts = $state<Workout[]>([]);
+	let executions = $state<WorkoutExecution[]>([]);
 	let selectedStudentId = $state<string | null>(null);
 	let editingStudentId = $state<string | null>(null);
 	let editingWorkoutId = $state<string | null>(null);
@@ -225,11 +236,15 @@
 	let selectedStudentWorkouts = $derived(
 		selectedStudent ? workouts.filter((workout) => workout.studentId === selectedStudent.id) : []
 	);
+	let selectedStudentExecutions = $derived(
+		executions.filter((execution) => !selectedStudent || execution.studentId === selectedStudent.id)
+	);
 	let workoutsCount = $derived(workouts.length);
 	let assignedStudentsCount = $derived(new Set(workouts.map((workout) => workout.studentId)).size);
 	let exercisesCount = $derived(
 		workouts.reduce((total, workout) => total + workout.exercises.length, 0)
 	);
+	let executionsCount = $derived(executions.length);
 	let activeViewInfo = $derived(
 		sidebarItems.find((item) => item.id === activeView) ?? sidebarItems[1]
 	);
@@ -240,6 +255,7 @@
 	onMount(() => {
 		void loadStudents();
 		void loadWorkouts();
+		void loadExecutions();
 	});
 
 	function switchAuthMode(mode: AuthMode) {
@@ -465,6 +481,17 @@
 			showError(error instanceof Error ? error.message : 'Erro inesperado ao carregar treinos.');
 		} finally {
 			isWorkoutsLoading = false;
+		}
+	}
+
+	async function loadExecutions() {
+		try {
+			const response = await fetch(`${EXECUTIONS_URL}/history`);
+			if (!response.ok) throw new Error('Nao foi possivel carregar o historico de treinos.');
+			executions = (await response.json()) as WorkoutExecution[];
+		} catch (error) {
+			executions = [];
+			showError(error instanceof Error ? error.message : 'Erro inesperado ao carregar historico.');
 		}
 	}
 
@@ -716,6 +743,28 @@
 			showSuccess('Treino excluido com sucesso.');
 		} catch (error) {
 			showError(error instanceof Error ? error.message : 'Erro inesperado ao excluir treino.');
+		}
+	}
+
+	async function recordExecution(workout: Workout) {
+		clearError();
+		clearSuccess();
+
+		try {
+			const response = await fetch(`${WORKOUTS_URL}/${workout.id}/executions`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ executedAt: new Date().toISOString() })
+			});
+
+			if (!response.ok) {
+				throw new Error(await getApiErrorMessage(response, 'Nao foi possivel registrar a execucao.'));
+			}
+
+			executions = [(await response.json()) as WorkoutExecution, ...executions];
+			showSuccess('Execucao registrada com sucesso.');
+		} catch (error) {
+			showError(error instanceof Error ? error.message : 'Erro inesperado ao registrar execucao.');
 		}
 	}
 
@@ -1204,6 +1253,9 @@
 												{/if}
 											</div>
 											<div class="row-actions">
+												<button class="execution-button" type="button" onclick={() => recordExecution(workout)}>
+													Registrar execucao
+												</button>
 												<button type="button" onclick={() => startEditingWorkout(workout)}
 													>Editar</button
 												>
@@ -1227,6 +1279,52 @@
 							</div>
 						{/if}
 					</section>
+				</section>
+			{:else if activeView === 'progress'}
+				<section class="metrics" aria-label="Indicadores de execucao">
+					<article class="metric-card">
+						<span class="metric-label">Execucoes registradas</span>
+						<strong>{executionsCount}</strong>
+						<p>Treinos realizados</p>
+					</article>
+					<article class="metric-card">
+						<span class="metric-label">Aluno selecionado</span>
+						<strong>{selectedStudent ? executions.filter((item) => item.studentId === selectedStudent.id).length : 0}</strong>
+						<p>Execucoes no historico</p>
+					</article>
+					<article class="metric-card">
+						<span class="metric-label">Ultima execucao</span>
+						<strong>{executions[0] ? formatDate(executions[0].executedAt) : '-'}</strong>
+						<p>Registro mais recente</p>
+					</article>
+				</section>
+
+				{#if errorMessage}<p class="feedback error">{errorMessage}</p>{/if}
+				{#if successMessage}<p class="feedback success">{successMessage}</p>{/if}
+
+				<section class="history-panel">
+					<div class="panel-heading">
+						<div>
+							<h2>Historico de execucao</h2>
+							<p>{selectedStudent ? `Registros de ${selectedStudent.name}` : 'Todos os alunos'}</p>
+						</div>
+					</div>
+					{#if selectedStudentExecutions.length === 0}
+						<p class="empty-state">Nenhuma execucao registrada. Acesse Treinos e marque um treino como realizado.</p>
+					{:else}
+						<div class="history-list">
+							{#each selectedStudentExecutions as execution (execution.id)}
+								<article class="history-card">
+									<span class="history-date">{formatDate(execution.executedAt)}</span>
+									<div>
+										<strong>{workouts.find((workout) => workout.id === execution.workoutId)?.title ?? 'Treino removido'}</strong>
+										<p>{getStudentName(execution.studentId)}{execution.durationMinutes ? ` · ${execution.durationMinutes} min` : ''}</p>
+										{#if execution.notes}<small>{execution.notes}</small>{/if}
+									</div>
+								</article>
+							{/each}
+						</div>
+					{/if}
 				</section>
 			{:else}
 				<section class="coming-soon" aria-label={`${activeViewInfo.title} em breve`}>
@@ -2170,6 +2268,47 @@
 	.workout-card p {
 		margin-top: 6px;
 		color: #6b7280;
+	}
+
+	.execution-button {
+		color: #147d5a;
+		font-weight: 700;
+	}
+
+	.history-panel {
+		margin-top: 24px;
+		padding: 24px;
+		border: 1px solid #e5e9ee;
+		border-radius: 20px;
+		background: #fff;
+	}
+
+	.history-list {
+		display: grid;
+		gap: 12px;
+	}
+
+	.history-card {
+		display: flex;
+		align-items: flex-start;
+		gap: 18px;
+		padding: 16px;
+		border: 1px solid #edf0f3;
+		border-radius: 14px;
+	}
+
+	.history-date {
+		min-width: 94px;
+		color: #147d5a;
+		font-size: 0.82rem;
+		font-weight: 700;
+	}
+
+	.history-card p,
+	.history-card small {
+		display: block;
+		margin: 5px 0 0;
+		color: #65717d;
 	}
 
 	.exercise-grid {

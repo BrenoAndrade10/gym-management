@@ -5,6 +5,7 @@ import { StudentOrmEntity } from './typeorm/entities/student.orm-entity';
 import { UserOrmEntity } from './typeorm/entities/user.orm-entity';
 import { WorkoutExerciseOrmEntity } from './typeorm/entities/workout-exercise.orm-entity';
 import { WorkoutOrmEntity } from './typeorm/entities/workout.orm-entity';
+import { WorkoutExecutionOrmEntity } from './typeorm/entities/workout-execution.orm-entity';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { WorkoutOrmEntity } from './typeorm/entities/workout.orm-entity';
           UserOrmEntity,
           WorkoutOrmEntity,
           WorkoutExerciseOrmEntity,
+          WorkoutExecutionOrmEntity,
         ],
         synchronize:
           configService.get<string>('TYPEORM_SYNCHRONIZE') === 'true',
